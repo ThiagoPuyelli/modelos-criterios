@@ -6,6 +6,7 @@
   <style>
     input[type="number"] { width: 60px; margin: 2px; }
     table, th, td { border: 1px solid black; border-collapse: collapse; padding: 5px; }
+    .error { color: red; }
   </style>
 </head>
 <body>
@@ -15,6 +16,8 @@
   <button onclick="crearMatriz()">Crear Matriz</button>
 
   <div id="matriz"></div>
+
+  <div id="probabilidades" style="margin-top:10px;"></div>
 
   <div id="coefHurwicz" style="margin-top:10px;">
     Coef. de optimismo (Hurwicz, entre 0 y 1): <input type="number" id="alpha" min="0" max="1" step="0.1" value="0.5">
@@ -30,7 +33,10 @@
       const rows = parseInt(document.getElementById('rows').value);
       const cols = parseInt(document.getElementById('cols').value);
       const contenedor = document.getElementById('matriz');
+      const probCont = document.getElementById('probabilidades');
+
       contenedor.innerHTML = '';
+      probCont.innerHTML = '';
 
       const tabla = document.createElement('table');
 
@@ -47,6 +53,25 @@
         tabla.appendChild(fila);
       }
       contenedor.appendChild(tabla);
+
+      // Inputs de probabilidades
+      const probLabel = document.createElement('p');
+      probLabel.innerText = 'Probabilidades (una por estado):';
+
+      const probInputs = document.createElement('div');
+      for (let j = 0; j < cols; j++) {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = '0.01';
+        input.min = '0';
+        input.max = '1';
+        input.id = `prob-${j}`;
+        input.value = (1 / cols).toFixed(2);
+        probInputs.appendChild(input);
+      }
+
+      probCont.appendChild(probLabel);
+      probCont.appendChild(probInputs);
     }
 
     function leerMatriz() {
@@ -65,13 +90,32 @@
       return matriz;
     }
 
+    function leerProbabilidades() {
+      const cols = parseInt(document.getElementById('cols').value);
+      const probs = [];
+
+      for (let j = 0; j < cols; j++) {
+        let val = parseFloat(document.getElementById(`prob-${j}`).value);
+        probs.push(isNaN(val) ? 0 : val);
+      }
+
+      return probs;
+    }
+
     function calcular() {
       const matriz = leerMatriz();
       const alpha = parseFloat(document.getElementById('alpha').value);
+      const probs = leerProbabilidades();
       const rows = matriz.length;
       const cols = matriz[0].length;
 
       let resultados = '';
+
+      const sumaProbs = probs.reduce((a, b) => a + b, 0);
+      if (Math.abs(sumaProbs - 1) > 0.01) {
+        document.getElementById('resultados').innerHTML = '<p class="error">⚠️ Las probabilidades deben sumar 1 (actual: ' + sumaProbs.toFixed(2) + ')</p>';
+        return;
+      }
 
       // Optimista (Maximax)
       const optimista = matriz.map(row => Math.max(...row));
@@ -85,7 +129,7 @@
       const hurwicz = matriz.map(row => alpha * Math.max(...row) + (1 - alpha) * Math.min(...row));
       resultados += `<p><strong>Hurwicz (α=${alpha}):</strong> Mejor decisión: ${hurwicz.indexOf(Math.max(...hurwicz)) + 1}, Valor: ${Math.max(...hurwicz).toFixed(2)}</p>`;
 
-      // Savage (minimiza el máximo arrepentimiento)
+      // Savage
       const arrepentimiento = [];
       for (let j = 0; j < cols; j++) {
         let colMax = Math.max(...matriz.map(row => row[j]));
@@ -98,10 +142,9 @@
       resultados += `<p><strong>Savage:</strong> Mejor decisión: ${maxArrep.indexOf(Math.min(...maxArrep)) + 1}, Valor: ${Math.min(...maxArrep)}</p>`;
 
       // BEIP y VEIP
-      // Para estos necesitamos probabilidades. Vamos a asumir iguales si no se piden.
-      const prob = Array(cols).fill(1 / cols);
-      const valorEsperado = matriz.map(row => row.reduce((acc, val, i) => acc + val * prob[i], 0));
+      const valorEsperado = matriz.map(row => row.reduce((acc, val, i) => acc + val * probs[i], 0));
       const mejorVE = Math.max(...valorEsperado);
+
       const mejorEstado = [];
       for (let j = 0; j < cols; j++) {
         let mejor = Number.NEGATIVE_INFINITY;
@@ -110,9 +153,11 @@
         }
         mejorEstado.push(mejor);
       }
-      const BEIP = mejorEstado.reduce((acc, val, i) => acc + val * prob[i], 0);
+
+      const BEIP = mejorEstado.reduce((acc, val, i) => acc + val * probs[i], 0);
       const VEIP = BEIP - mejorVE;
 
+      resultados += `<p><strong>Valor Esperado por Decisión:</strong> ${valorEsperado.map(v => v.toFixed(2)).join(', ')}</p>`;
       resultados += `<p><strong>BEIP:</strong> ${BEIP.toFixed(2)}</p>`;
       resultados += `<p><strong>VEIP:</strong> ${VEIP.toFixed(2)}</p>`;
 
